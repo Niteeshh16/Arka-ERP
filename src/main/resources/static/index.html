@@ -177,6 +177,13 @@
             background: var(--card);
             color: var(--text);
         }
+
+        .form-control::placeholder,
+        .form-select::placeholder,
+        textarea.form-control::placeholder {
+            color: var(--text-light);
+            opacity: 1;
+        }
         
         .form-control:focus, .form-select:focus {
             border-color: var(--primary);
@@ -325,6 +332,13 @@
         .timeline-item .card {
             background: var(--card);
             border: 1px solid var(--border);
+        }
+
+        .timeline-item strong,
+        .timeline-item .form-label,
+        .timeline-item .muted,
+        .timeline-item .chip {
+            color: var(--text);
         }
         
         .chip {
@@ -545,6 +559,10 @@
             background: var(--heading-primary);
             border-top: 1px solid var(--border);
         }
+
+        .visit-history-wrapper.hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -647,7 +665,7 @@
             </div>
 
             <!-- Patient Timeline Card -->
-            <div class="col-12">
+            <div class="col-12 visit-history-wrapper" id="visitHistoryWrapper">
                 <div class="card">
                     <div class="card-header">
                         <i class="bi bi-clock-history"></i> Visit History
@@ -667,13 +685,14 @@
                     <div class="card-body">
             <form id="visitForm">
                             <input type="hidden" id="editingVisitId" name="visitId">
+                            <input type="hidden" id="patientIdHiddenInput" name="patientId">
                             <div class="row mb-3">
                                 <div class="col-md-3">
                                     <label class="form-label">
-                                        Patient ID *
+                                        Patient Name *
                                         <span id="patientIdBadge" class="patient-id-badge" style="display: none;"></span>
                                     </label>
-                                    <input name="patientId" id="patientIdInput" class="form-control" placeholder="Select a patient" required readonly>
+                                    <input id="patientIdInput" class="form-control" placeholder="Select a patient" required readonly>
                                 </div>
                                 <div class="col-md-3">
                                     <label class="form-label">Visit Date & Time *</label>
@@ -773,6 +792,22 @@
         </div>
     </div>
 
+    <!-- Visit Details Modal -->
+    <div class="modal fade" id="visitDetailsModal" tabindex="-1" aria-labelledby="visitDetailsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content" style="border-radius: 1.25rem; border: none;">
+                <div class="modal-header" style="background: var(--heading-primary); color: var(--text); border-bottom: 1px solid var(--border);">
+                    <h5 class="modal-title" id="visitDetailsModalLabel" style="font-weight: 600; font-size: 1rem;">
+                        <i class="bi bi-journal-medical"></i> Visit Details
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="visitDetailsBody" style="padding: 2rem;">
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <!-- Flatpickr JS -->
@@ -783,6 +818,7 @@
         const patientList = document.getElementById('patientList');
         const patientDetails = document.getElementById('patientDetails');
         const patientTimeline = document.getElementById('patientTimeline');
+        const visitHistoryWrapper = document.getElementById('visitHistoryWrapper');
         const patientForm = document.getElementById('patientForm');
         const visitForm = document.getElementById('visitForm');
         const presContainer = document.getElementById('prescriptions');
@@ -790,6 +826,7 @@
         const patientFormStatus = document.getElementById('patientFormStatus');
         const visitFormStatus = document.getElementById('visitFormStatus');
         const patientIdInput = document.getElementById('patientIdInput');
+        const patientIdHiddenInput = document.getElementById('patientIdHiddenInput');
         const patientIdBadge = document.getElementById('patientIdBadge');
         const editingVisitId = document.getElementById('editingVisitId');
         const saveVisitBtn = document.getElementById('saveVisitBtn');
@@ -797,6 +834,8 @@
         const editPatientForm = document.getElementById('editPatientForm');
         const savePatientBtn = document.getElementById('savePatientBtn');
         const editPatientFormStatus = document.getElementById('editPatientFormStatus');
+        const visitDetailsBody = document.getElementById('visitDetailsBody');
+        const visitDetailsModal = new bootstrap.Modal(document.getElementById('visitDetailsModal'));
         const firstNameInput = document.getElementById('firstNameInput');
         const firstNameAutocomplete = document.getElementById('firstNameAutocomplete');
 
@@ -959,6 +998,7 @@
             if (!patient) {
                 patientDetails.innerHTML = '<p class="muted" style="font-size: 1.1rem;">Select a patient to view details.</p>';
                 patientTimeline.innerHTML = '<p class="muted" style="font-size: 1.1rem;">Select a patient to view visit history.</p>';
+                visitHistoryWrapper.classList.remove('hidden');
                 const patientDetailsActions = document.getElementById('patientDetailsActions');
                 if (patientDetailsActions) {
                     patientDetailsActions.style.display = 'none';
@@ -967,9 +1007,9 @@
             }
             currentPatient = patient;
             selectedPatientId = patient.id;
-            patientIdInput.value = patient.id;
-            patientIdBadge.textContent = `ID: ${patient.id}`;
-            patientIdBadge.style.display = 'inline-block';
+            patientIdHiddenInput.value = patient.id;
+            patientIdInput.value = patient.displayName || `${patient.firstName ?? ''} ${patient.lastName ?? ''}`.trim();
+            patientIdBadge.style.display = 'none';
 
             // Show edit button in header
             const patientDetailsActions = document.getElementById('patientDetailsActions');
@@ -1015,9 +1055,14 @@
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-start mb-2">
                                     <strong style="font-size: 1.05rem;"><i class="bi bi-calendar-event"></i> ${formatIndianDate(v.visitDate)}</strong>
-                                    <button type="button" class="btn btn-warning btn-sm edit-visit-btn" onclick="editVisit(${v.id})">
-                                        <i class="bi bi-pencil-square"></i> Edit
-                                    </button>
+                                    <div class="d-flex gap-2">
+                                        <button type="button" class="btn btn-light btn-sm edit-visit-btn" onclick="viewVisit(${v.id})">
+                                            <i class="bi bi-eye"></i> View
+                                        </button>
+                                        <button type="button" class="btn btn-warning btn-sm edit-visit-btn" onclick="editVisit(${v.id})">
+                                            <i class="bi bi-pencil-square"></i> Edit
+                                        </button>
+                                    </div>
                                 </div>
                                 ${v.symptoms ? `<div class="muted mb-2" style="font-size: 1.05rem;"><strong>Symptoms:</strong> ${v.symptoms}</div>` : ''}
                                 ${v.diagnosis ? `<div class="muted mb-2" style="font-size: 1.05rem;"><strong>Diagnosis:</strong> ${v.diagnosis}</div>` : ''}
@@ -1041,6 +1086,11 @@
                 `).join('')
                 : '<p class="muted text-center py-4" style="font-size: 1.1rem;">No visits recorded yet.</p>';
 
+            if (patient.visits?.length) {
+                visitHistoryWrapper.classList.remove('hidden');
+            } else {
+                visitHistoryWrapper.classList.add('hidden');
+            }
             patientTimeline.innerHTML = `<div class="timeline">${visitHtml}</div>`;
 
             // Fetch suggestions
@@ -1066,6 +1116,33 @@
                 // Scroll to form
                 document.getElementById('visitForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
+        };
+
+        window.viewVisit = function(visitId) {
+            if (!currentPatient || !currentPatient.visits) return;
+            const visit = currentPatient.visits.find(v => v.id === visitId);
+            if (!visit) return;
+
+            const prescriptionsHtml = visit.prescriptions?.length
+                ? visit.prescriptions.map(pr => `
+                    <div class="prescription-group">
+                        <div><strong>Medicine:</strong> ${pr.medicineName ?? '—'}</div>
+                        <div><strong>Dosage:</strong> ${pr.dosage || '—'}</div>
+                        <div><strong>Duration:</strong> ${pr.durationDays ? `${pr.durationDays} day(s)` : '—'}</div>
+                        <div><strong>Notes:</strong> ${pr.notes || '—'}</div>
+                    </div>
+                `).join('')
+                : '<p class="muted mb-0">No prescriptions recorded.</p>';
+
+            visitDetailsBody.innerHTML = `
+                <div class="mb-3"><strong>Patient:</strong> ${currentPatient.displayName || '—'}</div>
+                <div class="mb-3"><strong>Visit Date:</strong> ${formatIndianDate(visit.visitDate)}</div>
+                <div class="mb-3"><strong>Symptoms:</strong> ${visit.symptoms || '—'}</div>
+                <div class="mb-3"><strong>Diagnosis / Notes:</strong> ${visit.diagnosis || '—'}</div>
+                <div><strong>Prescriptions:</strong></div>
+                <div class="mt-2">${prescriptionsHtml}</div>
+            `;
+            visitDetailsModal.show();
         };
 
         // Open edit patient modal
@@ -1275,6 +1352,7 @@
                 searchPatients(searchInput.value);
                 renderPatientDetails(data);
                 resetVisitForm();
+                visitHistoryWrapper.classList.add('hidden');
             }).catch(err => {
                 showStatus(patientFormStatus, `✗ ${err.message}`, 'error');
             });
